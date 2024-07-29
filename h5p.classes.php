@@ -674,6 +674,7 @@ interface H5PFrameworkInterface {
 class H5PValidator {
   public $h5pF;
   public $h5pC;
+  public $h5pCV;
 
   // Schemas used to validate the h5p files
   private $h5pRequired = array(
@@ -1857,7 +1858,7 @@ Class H5PExport {
 
     foreach(array('authors', 'source', 'license', 'licenseVersion', 'licenseExtras' ,'yearFrom', 'yearTo', 'changes', 'authorComments', 'defaultLanguage') as $field) {
       if (isset($content['metadata'][$field]) && $content['metadata'][$field] !== '') {
-        if (($field !== 'authors' && $field !== 'changes') || (count($content['metadata'][$field]) > 0)) {
+        if (($field !== 'authors' && $field !== 'changes') || (!empty($content['metadata'][$field]))) {
           $h5pJson[$field] = json_decode(json_encode($content['metadata'][$field], TRUE));
         }
       }
@@ -2071,7 +2072,7 @@ class H5PCore {
 
   public static $coreApi = array(
     'majorVersion' => 1,
-    'minorVersion' => 25
+    'minorVersion' => 26
   );
   public static $styles = array(
     'styles/h5p.css',
@@ -2096,8 +2097,8 @@ class H5PCore {
     'js/h5p-utils.js',
   );
 
-  public static $defaultContentWhitelist = 'json png jpg jpeg gif bmp tif tiff svg eot ttf woff woff2 otf webm mp4 ogg mp3 m4a wav txt pdf rtf doc docx xls xlsx ppt pptx odt ods odp xml csv diff patch swf md textile vtt webvtt gltf glb';
-  public static $defaultLibraryWhitelistExtras = 'js css';
+  public static $defaultContentWhitelist = 'json png jpg jpeg gif bmp tif tiff eot ttf woff woff2 otf webm mp4 ogg mp3 m4a wav txt pdf rtf doc docx xls xlsx ppt pptx odt ods odp csv diff patch swf md textile vtt webvtt gltf glb';
+  public static $defaultLibraryWhitelistExtras = 'js css svg xml';
 
   public $librariesJsonData, $contentJsonData, $mainJsonData, $h5pF, $fs, $h5pD, $disableFileCheck;
   const SECONDS_IN_WEEK = 604800;
@@ -2126,6 +2127,21 @@ class H5PCore {
     self::DISABLE_EMBED => self::DISPLAY_OPTION_EMBED,
     self::DISABLE_COPYRIGHT => self::DISPLAY_OPTION_COPYRIGHT
   );
+
+  /** @var string */
+  public $url;
+
+  /** @var int evelopment mode. */
+  public $development_mode;
+
+  /** @var bool aggregated files for assets. */
+  public $aggregateAssets;
+
+  /** @var string full path of plugin. */
+  protected $fullPluginPath;
+
+  /** @var string regex for converting copied files paths. */
+  public $relativePathRegExp;
 
   /**
    * Constructor for the H5PCore
@@ -3764,7 +3780,12 @@ class H5PCore {
       'keywordsExits' => $this->h5pF->t('Keywords already exists!'),
       'someKeywordsExits' => $this->h5pF->t('Some of these keywords already exist'),
       'width' => $this->h5pF->t('width'),
-      'height' => $this->h5pF->t('height')
+      'height' => $this->h5pF->t('height'),
+      'rotateLeft' => $this->h5pF->t('Rotate Left'),
+      'rotateRight' => $this->h5pF->t('Rotate Right'),
+      'cropImage' => $this->h5pF->t('Crop Image'),
+      'confirmCrop' => $this->h5pF->t('Confirm Crop'),
+      'cancelCrop' => $this->h5pF->t('Cancel Crop')
     );
   }
 
@@ -3794,7 +3815,7 @@ class H5PCore {
         $this->h5pF->setErrorMessage($this->h5pF->t('Content is not shared on the H5P OER Hub.'));
         return NULL;
       }
-      throw new Exception($this->h5pF->t('Connecting to the content hub failed, please try again later.'));
+      throw new Exception($this->h5pF->t("Couldn't communicate with the H5P Hub. Please try again later."));
     }
 
     $hub_content = json_decode($response['data'])->data;
@@ -3961,6 +3982,7 @@ class H5PCore {
     }
 
     if ($accountInfo['status'] !== 200) {
+      $this->h5pF->setErrorMessage($this->h5pF->t('Unable to retrieve HUB account information. Please contact support.'));
       return false;
     }
 
@@ -4052,7 +4074,7 @@ class H5PCore {
       || $registration['status'] !== 200
     ) {
       return [
-        'message'     => 'Registration failed.',
+        'message'     => 'Unable to register the account. Please contact support team.',
         'status_code' => 422,
         'error_code'  => 'REGISTRATION_FAILED',
         'success'     => FALSE,
@@ -4145,6 +4167,9 @@ class H5PContentValidator {
   public $h5pC;
   private $typeMap, $libraries, $dependencies, $nextWeight;
   private static $allowed_styleable_tags = array('span', 'p', 'div','h1','h2','h3', 'td');
+
+  /** @var bool Allowed styles status. */
+  protected $allowedStyles;
 
   /**
    * Constructor for the H5PContentValidator
